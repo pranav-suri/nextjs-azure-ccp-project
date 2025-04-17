@@ -1,22 +1,14 @@
-import 'server-only';
-
-import { neon } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-http';
 import {
   pgTable,
   text,
   numeric,
   integer,
   timestamp,
-  pgEnum,
-  serial
+  serial,
+  uniqueIndex,
+  index
 } from 'drizzle-orm/pg-core';
-import { count, eq, ilike } from 'drizzle-orm';
-import { createInsertSchema } from 'drizzle-zod';
-
-export const db = drizzle(neon(process.env.POSTGRES_URL!));
-
-export const statusEnum = pgEnum('status', ['active', 'inactive', 'archived']);
+import { statusEnum } from '.';
 
 export const products = pgTable('products', {
   id: serial('id').primaryKey(),
@@ -28,45 +20,70 @@ export const products = pgTable('products', {
   availableAt: timestamp('available_at').notNull()
 });
 
-export type SelectProduct = typeof products.$inferSelect;
-export const insertProductSchema = createInsertSchema(products);
+export const users = pgTable(
+  'user',
+  {
+    id: text('id').primaryKey().notNull(),
+    name: text('name'),
+    email: text('email').notNull(),
+    emailVerified: timestamp('emailVerified'),
+    image: text('image')
+  },
+  (user) => ({
+    emailIndex: uniqueIndex('users__email__idx').on(user.email)
+  })
+);
 
-export async function getProducts(
-  search: string,
-  offset: number
-): Promise<{
-  products: SelectProduct[];
-  newOffset: number | null;
-  totalProducts: number;
-}> {
-  // Always search the full table, not per page
-  if (search) {
-    return {
-      products: await db
-        .select()
-        .from(products)
-        .where(ilike(products.name, `%${search}%`))
-        .limit(1000),
-      newOffset: null,
-      totalProducts: 0
-    };
-  }
+export const sessions = pgTable(
+  'session',
+  {
+    // id: text('id').primaryKey().notNull(),
+    expires: timestamp('expires', { withTimezone: false }).notNull(),
+    sessionToken: text('sessionToken').notNull(),
+    userId: text('userId').notNull()
+  },
+  (session) => ({
+    sessionTokenIndex: uniqueIndex('sessions__sessionToken__idx').on(
+      session.sessionToken
+    ),
+    userIdIndex: index('sessions__userId__idx').on(session.userId)
+  })
+);
 
-  if (offset === null) {
-    return { products: [], newOffset: null, totalProducts: 0 };
-  }
+export const accounts = pgTable(
+  'account',
+  {
+    id: serial('id').primaryKey(),
+    userId: text('userId').notNull(),
+    type: text('type').notNull(),
+    provider: text('provider').notNull(),
+    providerAccountId: text('providerAccountId').notNull(),
+    refresh_token: text('refresh_token'),
+    access_token: text('access_token'),
+    expires_at: timestamp('expires_at'),
+    token_type: text('token_type'),
+    scope: text('scope'),
+    id_token: text('id_token'),
+    session_state: text('session_state')
+  },
+  (account) => ({
+    providerProviderAccountIdIndex: uniqueIndex(
+      'accounts__provider__providerAccountId__idx'
+    ).on(account.provider, account.providerAccountId),
+    userIdIndex: index('accounts__userId__idx').on(account.userId)
+  })
+);
 
-  let totalProducts = await db.select({ count: count() }).from(products);
-  let moreProducts = await db.select().from(products).limit(5).offset(offset);
-  let newOffset = moreProducts.length >= 5 ? offset + 5 : null;
-
-  return {
-    products: moreProducts,
-    newOffset,
-    totalProducts: totalProducts[0].count
-  };
-}
-
-export async function deleteProductById(id: number) {
-  await db.delete(products).where(eq(products.id, id));
-}
+export const verificationTokens = pgTable(
+  'verificationToken',
+  {
+    identifier: text('identifier').primaryKey().notNull(),
+    token: text('token').notNull(),
+    expires: timestamp('expires').notNull()
+  },
+  (verificationToken) => ({
+    tokenIndex: uniqueIndex('verification_tokens__token__idx').on(
+      verificationToken.token
+    )
+  })
+);
